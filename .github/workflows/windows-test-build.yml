@@ -22,11 +22,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 5
+          fetch-depth: 0
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt
+          components: clippy, rustfmt
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -59,13 +59,21 @@ jobs:
       - name: Polygonal Lasso and related UI tests
         run: cargo test -p photocraft-ui-egui --lib --locked -- polygon_lasso move_mods shortcuts hold_keys
 
-      - name: Negative control (the new test must FAIL without the fix)
+      - name: Clippy (-D warnings, as AGENTS.md asks)
+        run: cargo clippy -p photocraft-ui-egui --all-targets --locked -- -D warnings
+
+      - name: Layering
+        run: cargo xtask layers
+
+      - name: Negative control (the new tests must FAIL without the fix)
         shell: bash
         run: |
-          git show f8198de6^:crates/ui-egui/src/canvas.rs > crates/ui-egui/src/canvas.rs
-          if grep -q polygon_cancel_stale crates/ui-egui/src/canvas.rs; then echo "::error::fix still present"; exit 1; fi
-          if cargo test -p photocraft-ui-egui --lib --locked switching_tools_drops_the_polygon; then
-            echo "::error::the test passed without the fix"; exit 1
-          else
-            echo "OK: the test fails without the fix, as it should"
-          fi
+          # Put the pre-fix callers back (state.rs keeps the polygon_doc field the tests read).
+          PRE=$(git log --format=%H --grep='^Polygonal Lasso: switching tools drops the polygon in progress' -n1)^
+          for f in canvas lib shortcuts; do git show "$PRE:crates/ui-egui/src/$f.rs" > "crates/ui-egui/src/$f.rs"; done
+          if grep -q polygon_cancel_stale crates/ui-egui/src/*.rs; then echo "::error::fix still present"; exit 1; fi
+          fail=0
+          for t in switching_to_another_tool_drops_the_polygon_in_progress switching_documents_drops_the_polygon_in_progress a_key_in_the_frame_of_a_tool_switch_cannot_commit_the_polygon; do
+            if cargo test -p photocraft-ui-egui --lib --locked -- "$t"; then echo "::error::$t passed without the fix"; fail=1; else echo "OK: $t fails without the fix"; fi
+          done
+          exit $fail
