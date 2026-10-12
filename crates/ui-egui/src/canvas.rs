@@ -5203,6 +5203,7 @@ fn polygon_click(app: &mut PhotocraftApp, x: f64, y: f64, mods: egui::Modifiers)
         return;
     }
     if app.ui.polygon.is_empty() {
+        app.ui.polygon_doc = app.session.active().map(|st| st.doc.id);
         // ⌥ with nothing selected draws freehand; there is nothing to subtract from.
         let nothing_selected = app.session.active().is_none_or(|st| st.doc.selection.is_none());
         let intent = if nothing_selected { egui::Modifiers { alt: false, ..mods } } else { mods };
@@ -5226,15 +5227,29 @@ pub fn polygon_retract(app: &mut PhotocraftApp) -> bool {
     true
 }
 
-/// The Polygonal Lasso outline belongs to the Polygonal Lasso: once another tool is selected it is
-/// dropped, so its vertices and rubber band don't stay drawn under (or get committed by) the new
-/// tool, and the selection it would have replaced is shown again. Like the Magnetic Lasso's border
-/// ([`crate::magnetic_lasso_ui::frame`]) and the Lasso's ([`crate::lasso_ui::cancel_stale`]).
-/// A held temporary tool (Space, ⌘) doesn't change the selected tool, so it keeps the outline.
+/// The Polygonal Lasso outline belongs to the Polygonal Lasso and to the document it was started
+/// on: once another tool is selected, or another document becomes active, it is dropped. Its
+/// vertices and rubber band then don't stay drawn under (or get committed by) the new tool or on
+/// the other document, and the selection it would have replaced is shown again. Like the Magnetic
+/// Lasso's border ([`crate::magnetic_lasso_ui::frame`]) and the Lasso's
+/// ([`crate::lasso_ui::cancel_stale`]). A held temporary tool (Space, Cmd) doesn't change the
+/// selected tool, so it keeps the outline. Run on every frame, on every command (`sync_views`) and
+/// before the keys are handled, so a key pressed in the frame of the switch can't commit it.
 pub fn polygon_cancel_stale(app: &mut PhotocraftApp) {
-    if app.ui.tool != Tool::PolygonLasso && (!app.ui.polygon.is_empty() || !app.ui.polygon_mode.is_empty()) {
-        app.ui.polygon.clear();
-        app.ui.polygon_mode.clear();
+    let active = app.session.active().map(|st| st.doc.id);
+    let other_tool = app.ui.tool != Tool::PolygonLasso;
+    let other_doc = app.ui.polygon_doc.is_some_and(|d| Some(d) != active);
+    if other_tool || other_doc {
+        if !app.ui.polygon.is_empty() || !app.ui.polygon_mode.is_empty() || app.ui.polygon_doc.is_some() {
+            app.ui.polygon.clear();
+            app.ui.polygon_mode.clear();
+            app.ui.polygon_doc = None;
+        }
+    } else if app.ui.polygon.is_empty() {
+        app.ui.polygon_doc = None;
+    } else if app.ui.polygon_doc.is_none() {
+        // An outline made before any document was claimed (control channel, tests) is the active one's.
+        app.ui.polygon_doc = active;
     }
 }
 

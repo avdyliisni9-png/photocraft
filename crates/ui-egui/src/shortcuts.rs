@@ -300,6 +300,9 @@ pub fn handle(app: &mut PhotocraftApp, ctx: &egui::Context) {
     // However the tool was picked (toolbar, flyout, shortcut, automation), its group's key brings
     // it back later (#2608).
     app.ui.remember_group_tool();
+    // A Polygonal Lasso outline left behind by a tool or document switch is dropped before the keys
+    // run: Enter, Esc and ⌫ must not act on it (the canvas drops it too, but after the keys).
+    crate::canvas::polygon_cancel_stale(app);
     // Camera Raw is modal like Photoshop's filter dialog: no application shortcut (Save, Undo,
     // tools) runs beneath it, and it handles its own keys (Y, U, O, S). Unlike the other dialogs
     // below it covers the canvas, so canvas zoom keys are blocked too.
