@@ -1,0 +1,72 @@
+name: Windows test build
+
+# Test-only workflow for a fork: builds the Windows app from this branch, runs the Polygonal Lasso
+# tests, and uploads a portable zip. It is not part of the fix and must not go into a PR.
+
+on:
+  push:
+    branches: [ci/windows-test-build]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 5
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Format
+        run: cargo fmt --all -- --check
+
+      - name: Build release (static CRT, as packaging/windows/package.ps1 does)
+        env:
+          CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: -C target-feature=+crt-static
+        run: cargo build --release --locked -p photocraft -p photocraft-cli --features heif --target x86_64-pc-windows-msvc
+
+      - name: Package portable zip
+        shell: pwsh
+        run: |
+          $bin = 'target\x86_64-pc-windows-msvc\release'
+          $stage = 'dist\photocraft-fix-windows-x64-portable'
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item "$bin\photocraft.exe", "$bin\photocraft-cli.exe", 'packaging\windows\portable.txt' $stage
+          Compress-Archive -Path "$stage\*" -DestinationPath 'dist\photocraft-fix-windows-x64-portable.zip'
+          Get-ChildItem dist | Format-Table Name, Length
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: photocraft-fix-windows-x64-portable
+          path: dist/photocraft-fix-windows-x64-portable.zip
+          if-no-files-found: error
+
+      - name: Polygonal Lasso and related UI tests
+        run: cargo test -p photocraft-ui-egui --lib --locked polygon_lasso move_mods shortcuts hold_keys
+
+      - name: Negative control (the new test must FAIL without the fix)
+        shell: bash
+        run: |
+          git show HEAD~1:crates/ui-egui/src/canvas.rs > /dev/null
+          git show HEAD~2:crates/ui-egui/src/canvas.rs > crates/ui-egui/src/canvas.rs
+          if grep -q polygon_cancel_stale crates/ui-egui/src/canvas.rs; then echo "::error::fix still present"; exit 1; fi
+          if cargo test -p photocraft-ui-egui --lib --locked switching_tools_drops_the_polygon; then
+            echo "::error::the test passed without the fix"; exit 1
+          else
+            echo "OK: the test fails without the fix, as it should"
+          fi
