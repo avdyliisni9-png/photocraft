@@ -380,29 +380,111 @@ fn shift_polygonal_lasso_snap_has_all_eight_directions_and_handles_zero_length()
     assert_eq!(crate::canvas::constrained_polygon_point(origin, origin), origin);
 }
 
-/// Choosing another tool with a polygon half drawn drops it (it stayed on the canvas under the
+/// Two vertices placed with the Polygonal Lasso, well apart in time so they aren't a double-click.
+fn two_vertices(h: &mut Harness<'static, PhotocraftApp>) {
+    click(h, 50.0, 50.0, Modifiers::NONE);
+    h.run_steps(30);
+    click(h, 150.0, 50.0, Modifiers::NONE);
+    h.run_steps(30);
+    assert_eq!(h.state().ui.polygon.len(), 2);
+}
+
+/// The polygon, its mode and its document are all gone, and the selection it would have replaced
+/// is shown again.
+fn assert_polygon_dropped(h: &Harness<'static, PhotocraftApp>, what: &str) {
+    let app = h.state();
+    assert!(app.ui.polygon.is_empty(), "{what}: the outline is gone: {:?}", app.ui.polygon);
+    assert!(app.ui.polygon_mode.is_empty(), "{what}: the mode is gone");
+    assert!(app.ui.polygon_doc.is_none(), "{what}: the document is forgotten");
+    assert!(!crate::canvas::polygon_replaces_selection(app), "{what}: the old outline is shown again");
+}
+
+/// Choosing any other tool with a polygon half drawn drops it (it stayed on the canvas under the
 /// Quick Selection tool), and the selection it would have replaced is shown again. Coming back to
 /// the Polygonal Lasso starts a new polygon.
 #[test]
-fn switching_tools_drops_the_polygon_in_progress() {
+fn switching_to_another_tool_drops_the_polygon_in_progress() {
+    let tools = [
+        Tool::QuickSelection,
+        Tool::ObjectSelection,
+        Tool::MagicWand,
+        Tool::RectMarquee,
+        Tool::EllipseMarquee,
+        Tool::Lasso,
+        Tool::MagneticLasso,
+        Tool::Move,
+        Tool::Brush,
+    ];
+    for tool in tools {
+        let mut h = harness();
+        h.state_mut().run("select.rect", json!({"x": 200, "y": 150, "width": 100, "height": 100})).unwrap();
+        h.run_steps(1);
+        let before = steps(&h);
+        two_vertices(&mut h);
+        assert!(crate::canvas::polygon_replaces_selection(h.state()), "{tool:?}: the old outline is hidden while drawing");
+        h.state_mut().ui.tool = tool;
+        h.run_steps(2);
+        assert_polygon_dropped(&h, &format!("{tool:?}"));
+        assert!(selection(&h).is_some_and(|r| near(r, 200, 150, 300, 250)), "{tool:?}: {:?}", selection(&h));
+        assert_eq!(steps(&h), before, "{tool:?}: nothing was recorded");
+        h.state_mut().ui.tool = Tool::PolygonLasso;
+        h.run_steps(2);
+        assert!(h.state().ui.polygon.is_empty(), "{tool:?}: coming back starts a new polygon");
+    }
+}
+
+/// The polygon belongs to the document it was started on: another document becoming active drops
+/// it, while the tool stays the Polygonal Lasso.
+#[test]
+fn switching_documents_drops_the_polygon_in_progress() {
     let mut h = harness();
-    h.state_mut().run("select.rect", json!({"x": 200, "y": 150, "width": 100, "height": 100})).unwrap();
-    h.run_steps(1);
+    two_vertices(&mut h);
+    let first = h.state().session.active().map(|st| st.doc.id);
+    assert!(first.is_some());
+    assert_eq!(h.state().ui.polygon_doc, first, "the polygon remembers its document");
+    h.state_mut().run("file.new", json!({"width": 200, "height": 100})).unwrap();
+    h.run_steps(2);
+    assert_ne!(h.state().session.active().map(|st| st.doc.id), first, "another document is active");
+    assert_polygon_dropped(&h, "new document");
+    assert_eq!(h.state().ui.tool, Tool::PolygonLasso, "the tool stays");
+}
+
+/// A held temporary tool (Space is the Hand, ⌘ the Move tool) doesn't change the selected tool,
+/// so the polygon being drawn stays.
+#[test]
+fn a_held_temporary_tool_keeps_the_polygon() {
+    let mut h = harness();
+    two_vertices(&mut h);
+    h.event(egui::Event::Key { key: egui::Key::Space, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE });
+    h.run_steps(3);
+    assert_eq!(h.state().ui.tool, Tool::PolygonLasso);
+    assert_eq!(h.state().ui.polygon.len(), 2, "Space held");
+    h.event(egui::Event::Key { key: egui::Key::Space, physical_key: None, pressed: false, repeat: false, modifiers: Modifiers::NONE });
+    h.run_steps(3);
+    h.event(egui::Event::ModifiersChanged(Modifiers::COMMAND));
+    h.run_steps(3);
+    assert_eq!(h.state().ui.tool, Tool::PolygonLasso);
+    assert_eq!(h.state().ui.polygon.len(), 2, "⌘ held");
+    h.event(egui::Event::ModifiersChanged(Modifiers::NONE));
+    h.run_steps(3);
+    assert_eq!(h.state().ui.polygon.len(), 2, "released");
+}
+
+/// A key pressed in the frame of the tool switch must not act on the dropped polygon: Enter used
+/// to close it into a selection under the new tool.
+#[test]
+fn a_key_in_the_frame_of_a_tool_switch_cannot_commit_the_polygon() {
+    let mut h = harness();
+    for (x, y) in [(50.0, 50.0), (150.0, 50.0), (150.0, 150.0)] {
+        click(&mut h, x, y, Modifiers::NONE);
+        h.run_steps(30);
+    }
+    assert_eq!(h.state().ui.polygon.len(), 3);
     let before = steps(&h);
-    click(&mut h, 50.0, 50.0, Modifiers::NONE);
-    h.run_steps(30);
-    click(&mut h, 150.0, 50.0, Modifiers::NONE);
-    h.run_steps(30);
-    assert_eq!(h.state().ui.polygon.len(), 2);
-    assert!(crate::canvas::polygon_replaces_selection(h.state()), "the old outline is hidden while drawing");
     h.state_mut().ui.tool = Tool::QuickSelection;
+    h.key_press(egui::Key::Enter);
     h.run_steps(2);
-    assert!(h.state().ui.polygon.is_empty(), "the outline is gone: {:?}", h.state().ui.polygon);
-    assert!(h.state().ui.polygon_mode.is_empty());
-    assert!(!crate::canvas::polygon_replaces_selection(h.state()), "the old outline is shown again");
-    assert!(selection(&h).is_some_and(|r| near(r, 200, 150, 300, 250)), "{:?}", selection(&h));
+    assert!(selection(&h).is_none(), "no selection was made from the dropped polygon: {:?}", selection(&h));
     assert_eq!(steps(&h), before, "nothing was recorded");
-    h.state_mut().ui.tool = Tool::PolygonLasso;
-    h.run_steps(2);
-    assert!(h.state().ui.polygon.is_empty(), "coming back starts a new polygon");
+    assert_polygon_dropped(&h, "Enter");
 }
