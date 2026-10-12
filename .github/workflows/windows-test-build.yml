@@ -71,7 +71,7 @@ jobs:
           # Put the pre-fix callers back (state.rs keeps the polygon_doc field the tests read).
           PRE=$(git log --format=%H --grep='^Polygonal Lasso: switching tools drops the polygon in progress' -n1)^
           for f in canvas lib shortcuts; do git show "$PRE:crates/ui-egui/src/$f.rs" > "crates/ui-egui/src/$f.rs"; done
-          if grep -q polygon_cancel_stale crates/ui-egui/src/*.rs; then echo "::error::fix still present"; exit 1; fi
+          if grep -q polygon_cancel_stale crates/ui-egui/src/canvas.rs crates/ui-egui/src/lib.rs crates/ui-egui/src/shortcuts.rs; then echo "::error::fix still present"; exit 1; fi
           fail=0
           for t in switching_to_another_tool_drops_the_polygon_in_progress switching_documents_drops_the_polygon_in_progress a_key_in_the_frame_of_a_tool_switch_cannot_commit_the_polygon; do
             if cargo test -p photocraft-ui-egui --lib --locked -- "$t"; then echo "::error::$t passed without the fix"; fail=1; else echo "OK: $t fails without the fix"; fi
