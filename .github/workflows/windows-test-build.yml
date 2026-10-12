@@ -57,7 +57,7 @@ jobs:
           if-no-files-found: error
 
       - name: Polygonal Lasso and related UI tests
-        run: cargo test -p photocraft-ui-egui --lib --locked polygon_lasso move_mods shortcuts hold_keys
+        run: cargo test -p photocraft-ui-egui --lib --locked -- polygon_lasso move_mods shortcuts hold_keys
 
       - name: Negative control (the new test must FAIL without the fix)
         shell: bash
