@@ -62,8 +62,7 @@ jobs:
       - name: Negative control (the new test must FAIL without the fix)
         shell: bash
         run: |
-          git show HEAD~1:crates/ui-egui/src/canvas.rs > /dev/null
-          git show HEAD~2:crates/ui-egui/src/canvas.rs > crates/ui-egui/src/canvas.rs
+          git show f8198de6^:crates/ui-egui/src/canvas.rs > crates/ui-egui/src/canvas.rs
           if grep -q polygon_cancel_stale crates/ui-egui/src/canvas.rs; then echo "::error::fix still present"; exit 1; fi
           if cargo test -p photocraft-ui-egui --lib --locked switching_tools_drops_the_polygon; then
             echo "::error::the test passed without the fix"; exit 1
