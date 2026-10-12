@@ -379,3 +379,30 @@ fn shift_polygonal_lasso_snap_has_all_eight_directions_and_handles_zero_length()
     }
     assert_eq!(crate::canvas::constrained_polygon_point(origin, origin), origin);
 }
+
+/// Choosing another tool with a polygon half drawn drops it (it stayed on the canvas under the
+/// Quick Selection tool), and the selection it would have replaced is shown again. Coming back to
+/// the Polygonal Lasso starts a new polygon.
+#[test]
+fn switching_tools_drops_the_polygon_in_progress() {
+    let mut h = harness();
+    h.state_mut().run("select.rect", json!({"x": 200, "y": 150, "width": 100, "height": 100})).unwrap();
+    h.run_steps(1);
+    let before = steps(&h);
+    click(&mut h, 50.0, 50.0, Modifiers::NONE);
+    h.run_steps(30);
+    click(&mut h, 150.0, 50.0, Modifiers::NONE);
+    h.run_steps(30);
+    assert_eq!(h.state().ui.polygon.len(), 2);
+    assert!(crate::canvas::polygon_replaces_selection(h.state()), "the old outline is hidden while drawing");
+    h.state_mut().ui.tool = Tool::QuickSelection;
+    h.run_steps(2);
+    assert!(h.state().ui.polygon.is_empty(), "the outline is gone: {:?}", h.state().ui.polygon);
+    assert!(h.state().ui.polygon_mode.is_empty());
+    assert!(!crate::canvas::polygon_replaces_selection(h.state()), "the old outline is shown again");
+    assert!(selection(&h).is_some_and(|r| near(r, 200, 150, 300, 250)), "{:?}", selection(&h));
+    assert_eq!(steps(&h), before, "nothing was recorded");
+    h.state_mut().ui.tool = Tool::PolygonLasso;
+    h.run_steps(2);
+    assert!(h.state().ui.polygon.is_empty(), "coming back starts a new polygon");
+}

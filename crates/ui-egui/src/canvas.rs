@@ -2865,6 +2865,8 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
     crate::stylus::Stylus::sync_eraser_tool(app);
     // A Magnetic Lasso border left behind by a tool or document switch is dropped.
     crate::magnetic_lasso_ui::frame(app);
+    // ... and so is a Polygonal Lasso outline left behind by a tool switch.
+    polygon_cancel_stale(app);
     // A Properties Levels/Curves eyedropper left behind by a tool or layer switch is dropped.
     crate::layer_picker::prune(app);
     // Held keys (hold_keys.rs): Space repositions a crop frame, marquee, lasso or shape being
@@ -5222,6 +5224,18 @@ pub fn polygon_retract(app: &mut PhotocraftApp) -> bool {
         app.ui.polygon_mode.clear();
     }
     true
+}
+
+/// The Polygonal Lasso outline belongs to the Polygonal Lasso: once another tool is selected it is
+/// dropped, so its vertices and rubber band don't stay drawn under (or get committed by) the new
+/// tool, and the selection it would have replaced is shown again. Like the Magnetic Lasso's border
+/// ([`crate::magnetic_lasso_ui::frame`]) and the Lasso's ([`crate::lasso_ui::cancel_stale`]).
+/// A held temporary tool (Space, ⌘) doesn't change the selected tool, so it keeps the outline.
+pub fn polygon_cancel_stale(app: &mut PhotocraftApp) {
+    if app.ui.tool != Tool::PolygonLasso && (!app.ui.polygon.is_empty() || !app.ui.polygon_mode.is_empty()) {
+        app.ui.polygon.clear();
+        app.ui.polygon_mode.clear();
+    }
 }
 
 /// A new-selection polygonal (or magnetic) lasso is being drawn, so the selection it will replace
