@@ -1,0 +1,79 @@
+name: Windows test build
+
+# Test-only workflow for a fork: builds the Windows app from this branch, runs the Polygonal Lasso
+# tests, and uploads a portable zip. It is not part of the fix and must not go into a PR.
+
+on:
+  push:
+    branches: [ci/windows-test-build-2]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Format
+        run: cargo fmt --all -- --check
+
+      - name: Build release (static CRT, as packaging/windows/package.ps1 does)
+        env:
+          CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: -C target-feature=+crt-static
+        run: cargo build --release --locked -p photocraft -p photocraft-cli --features heif --target x86_64-pc-windows-msvc
+
+      - name: Package portable zip
+        shell: pwsh
+        run: |
+          $bin = 'target\x86_64-pc-windows-msvc\release'
+          $stage = 'dist\photocraft-fix-windows-x64-portable'
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item "$bin\photocraft.exe", "$bin\photocraft-cli.exe", 'packaging\windows\portable.txt' $stage
+          Compress-Archive -Path "$stage\*" -DestinationPath 'dist\photocraft-fix-windows-x64-portable.zip'
+          Get-ChildItem dist | Format-Table Name, Length
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: photocraft-fix-windows-x64-portable
+          path: dist/photocraft-fix-windows-x64-portable.zip
+          if-no-files-found: error
+
+      - name: Polygonal Lasso and related UI tests
+        run: cargo test -p photocraft-ui-egui --lib --locked -- polygon_lasso move_mods shortcuts hold_keys
+
+      - name: Clippy (-D warnings, as AGENTS.md asks)
+        run: cargo clippy -p photocraft-ui-egui --all-targets --locked -- -D warnings
+
+      - name: Layering
+        run: cargo xtask layers
+
+      - name: Negative control (the document-switch test must FAIL without the change)
+        shell: bash
+        run: |
+          # Restore upstream's canvas.rs and lib.rs (no polygon_cancel_stale); state.rs keeps the field the tests read.
+          git show 6f850542:crates/ui-egui/src/canvas.rs > crates/ui-egui/src/canvas.rs
+          git show 6f850542:crates/ui-egui/src/lib.rs > crates/ui-egui/src/lib.rs
+          if grep -q polygon_cancel_stale crates/ui-egui/src/canvas.rs crates/ui-egui/src/lib.rs; then echo "::error::change still present"; exit 1; fi
+          if cargo test -p photocraft-ui-egui --lib --locked -- switching_documents_drops_the_polygon_in_progress; then
+            echo "::error::passed without the change"; exit 1
+          else
+            echo "OK: switching_documents_drops_the_polygon_in_progress fails without the change"
+          fi
